@@ -677,8 +677,8 @@
                             !isAuth ? (
                                 <div className="max-w-md mx-auto p-10 bg-white rounded-3xl shadow-2xl text-center border mt-10">
                                     <h2 className="text-2xl font-black mb-6">Вход за Учител</h2>
-                                    <input type="password" placeholder="Парола..." className="w-full p-4 border-2 rounded-2xl mb-6 text-center text-xl outline-none focus:border-blue-500" onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === 'Enter' && (pass === 'vilidaf76' ? setIsAuth(true) : alert('Грешна парола'))} />
-                                    <button onClick={() => pass === 'admin' ? setIsAuth(true) : alert('Грешна парола')} className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black text-lg hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all">Влез в настройките</button>
+                                    <input type="password" placeholder="Парола..." className="w-full p-4 border-2 rounded-2xl mb-6 text-center text-xl outline-none focus:border-blue-500" onChange={e => setPass(e.target.value)} onKeyDown={e => e.key === 'Enter' && (pass === 'admin' ? setIsAuth(true) : alert('Грешна парола'))} />
+                                    <button onClick={() => pass === 'vilidaf76' ? setIsAuth(true) : alert('Грешна парола')} className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black text-lg hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all">Влез в настройките</button>
                                 </div>
                             ) : (
                                 <div className="space-y-6 animate-fade-in">
@@ -890,4 +890,5 @@
 </body>
 
 </html>
+
 
