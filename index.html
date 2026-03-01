@@ -51,6 +51,15 @@
             return cleanP1 + cleanP2;
         };
 
+        const safeJsonParse = (value, fallbackValue = null) => {
+            try {
+                return JSON.parse(value);
+            } catch (err) {
+                console.error('JSON parse error:', err);
+                return fallbackValue;
+            }
+        };
+
         // =========================================================
         // 1. КЛЮЧ ЗА GOOGLE CLOUD TEXT-TO-SPEECH (ЧЕТЕЦЪТ)
         // =========================================================
@@ -59,17 +68,31 @@
         const TTS_API_KEY = getValidKey(ttsPart1, ttsPart2);
 
         let currentAudio = null;
+        let isTtsEnabled = true;
 
-        const speak = async (text) => {
-            if (!text) return;
-
+        const stopSpeaking = () => {
             if (currentAudio) {
                 currentAudio.pause();
                 currentAudio.currentTime = 0;
+                currentAudio = null;
             }
+
             if (window.speechSynthesis) {
                 window.speechSynthesis.cancel();
             }
+        };
+
+        const setTtsEnabledState = (enabled) => {
+            isTtsEnabled = Boolean(enabled);
+            if (!isTtsEnabled) {
+                stopSpeaking();
+            }
+        };
+
+        const speak = async (text) => {
+            if (!text || !isTtsEnabled) return;
+
+            stopSpeaking();
 
             // Използване на Google AI TTS
             if (TTS_API_KEY) {
@@ -99,10 +122,12 @@
             }
 
             // Fallback: Вграденият глас на браузъра
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'bg-BG';
-            utterance.rate = 0.85;
-            window.speechSynthesis.speak(utterance);
+            if (window.speechSynthesis) {
+                const utterance = new SpeechSynthesisUtterance(text);
+                utterance.lang = 'bg-BG';
+                utterance.rate = 0.85;
+                window.speechSynthesis.speak(utterance);
+            }
         };
 
         const Icons = {
@@ -425,6 +450,7 @@
             const [theme, setTheme] = useState('default');
             const [fontSize, setFontSize] = useState('normal');
             const [isAuth, setIsAuth] = useState(false);
+            const [isTtsEnabledUi, setIsTtsEnabledUi] = useState(true);
             const [pass, setPass] = useState('');
             const [playerIsReady, setPlayerIsReady] = useState(false);
             
@@ -445,6 +471,10 @@
             const teacherPlayerRef = useRef(null);
             const teacherVideoContainerRef = useRef(null);
             const fileInputRef = useRef(null);
+
+            useEffect(() => {
+                setTtsEnabledState(isTtsEnabledUi);
+            }, [isTtsEnabledUi]);
 
             // Инициализация на Firebase
             useEffect(() => {
@@ -468,11 +498,15 @@
 
                         let configToUse;
                         if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                            configToUse = JSON.parse(__firebase_config);
-                        } else if (myFirebaseConfig.apiKey && myFirebaseConfig.projectId) {
+                            configToUse = safeJsonParse(__firebase_config, null);
+                        }
+
+                        if (!configToUse && myFirebaseConfig.apiKey && myFirebaseConfig.projectId) {
                             configToUse = myFirebaseConfig;
-                        } else {
-                            return; 
+                        }
+
+                        if (!configToUse) {
+                            return;
                         }
                         
                         const dynamicImport = new Function('url', 'return import(url)');
@@ -728,14 +762,24 @@
                         {view === 'student' ? (
                             <div className="animate-fade-in space-y-6 max-w-4xl mx-auto">
                                 {questions.length > 0 && (
-                                    <div className="flex items-center gap-3 bg-white p-4 rounded-3xl shadow-sm border-2 border-slate-100">
-                                        <span className="font-bold text-slate-500 uppercase tracking-wider text-xs sm:text-sm">Прогрес:</span>
-                                        <div className="flex-1 bg-slate-100 h-6 rounded-full overflow-hidden shadow-inner relative">
-                                            <div className="bg-yellow-400 h-full transition-all duration-1000 ease-out" style={{ width: `${(answeredCount / questions.length) * 100}%` }}></div>
+                                    <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-white p-4 rounded-3xl shadow-sm border-2 border-slate-100">
+                                        <div className="flex items-center gap-3 flex-1">
+                                            <span className="font-bold text-slate-500 uppercase tracking-wider text-xs sm:text-sm">Прогрес:</span>
+                                            <div className="flex-1 bg-slate-100 h-6 rounded-full overflow-hidden shadow-inner relative">
+                                                <div className="bg-yellow-400 h-full transition-all duration-1000 ease-out" style={{ width: `${(answeredCount / questions.length) * 100}%` }}></div>
+                                            </div>
+                                            <span className="font-black text-yellow-500 flex items-center gap-1 text-lg">
+                                                {answeredCount} / {questions.length} <Icons.Star className="w-6 h-6 text-yellow-400 drop-shadow-sm" />
+                                            </span>
                                         </div>
-                                        <span className="font-black text-yellow-500 flex items-center gap-1 text-lg">
-                                            {answeredCount} / {questions.length} <Icons.Star className="w-6 h-6 text-yellow-400 drop-shadow-sm" />
-                                        </span>
+                                        <button
+                                            onClick={() => setIsTtsEnabledUi(prev => !prev)}
+                                            className={`px-4 py-2 rounded-2xl font-bold border-2 transition-colors ${isTtsEnabledUi ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
+                                            aria-pressed={isTtsEnabledUi}
+                                            title={isTtsEnabledUi ? 'Изключи четеца' : 'Включи четеца'}
+                                        >
+                                            {isTtsEnabledUi ? '🔊 Четец: ВКЛ.' : '🔇 Четец: ИЗКЛ.'}
+                                        </button>
                                     </div>
                                 )}
 
