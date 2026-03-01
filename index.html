@@ -678,6 +678,36 @@
                 return '';
             };
 
+            const getNextReadMode = (currentMode) => {
+                if (currentMode === 'manual') return 'question_only';
+                if (currentMode === 'question_only') return 'question_options';
+                return 'manual';
+            };
+
+            const getReadModeMeta = (mode) => {
+                if (mode === 'manual') {
+                    return {
+                        label: '🧠 Четене: Ръчно',
+                        title: 'Ръчно четене (само чрез бутона говорител)',
+                        className: 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100'
+                    };
+                }
+
+                if (mode === 'question_options') {
+                    return {
+                        label: '🧠 Четене: Въпрос + опции',
+                        title: 'Автоматично четене: въпрос + опции',
+                        className: 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'
+                    };
+                }
+
+                return {
+                    label: '🧠 Четене: Само въпрос',
+                    title: 'Автоматично четене: само въпрос',
+                    className: 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
+                };
+            };
+
             const speakQuestionPrompt = async (question) => {
                 if (!question) return;
 
@@ -809,12 +839,12 @@
                                                 {isTtsEnabledUi ? '🔊 Четец: ВКЛ.' : '🔇 Четец: ИЗКЛ.'}
                                             </button>
                                             <button
-                                                onClick={() => setReadMode(prev => prev === 'manual' ? 'question_only' : prev === 'question_only' ? 'question_options' : 'manual')}
-                                                className={`px-4 py-2 rounded-2xl font-bold border-2 transition-colors ${readMode === 'manual' ? 'bg-purple-50 text-purple-700 border-purple-200 hover:bg-purple-100' : readMode === 'question_options' ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'}`}
-                                                title={readMode === 'manual' ? 'Ръчно четене (само чрез бутона говорител)' : readMode === 'question_options' ? 'Автоматично четене: въпрос + опции' : 'Автоматично четене: само въпрос'}
+                                                onClick={() => setReadMode(prev => getNextReadMode(prev))}
+                                                className={`px-4 py-2 rounded-2xl font-bold border-2 transition-colors ${getReadModeMeta(readMode).className}`}
+                                                title={getReadModeMeta(readMode).title}
                                                 disabled={!isTtsEnabledUi}
                                             >
-                                                {readMode === 'manual' ? '🧠 Четене: Ръчно' : readMode === 'question_options' ? '🧠 Четене: Въпрос + опции' : '🧠 Четене: Само въпрос'}
+                                                {getReadModeMeta(readMode).label}
                                             </button>
                                         </div>
                                     </div>
