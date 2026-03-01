@@ -452,6 +452,7 @@
             const [isAuth, setIsAuth] = useState(false);
             const [isTtsEnabledUi, setIsTtsEnabledUi] = useState(true);
             const [readMode, setReadMode] = useState('question_only');
+            const [showSettingsPanel, setShowSettingsPanel] = useState(false);
             const [pass, setPass] = useState('');
             const [playerIsReady, setPlayerIsReady] = useState(false);
             
@@ -708,6 +709,12 @@
                 };
             };
 
+            const getThemeLabel = (currentTheme) => {
+                if (currentTheme === 'sop-soft') return 'Мека тема';
+                if (currentTheme === 'sop-high-contrast') return 'Висок контраст';
+                return 'Стандартна тема';
+            };
+
             const speakQuestionPrompt = async (question) => {
                 if (!question) return;
 
@@ -801,13 +808,34 @@
             return (
                 <div className={`min-h-screen transition-all ${theme} ${fontSize === 'big' ? 'big-font' : ''}`}>
                     <nav className="bg-white border-b p-3 flex justify-between items-center sticky top-0 z-50 shadow-sm">
-                        <div className="flex gap-2">
-                            <button onClick={() => setTheme(theme === 'default' ? 'sop-soft' : theme === 'sop-soft' ? 'sop-high-contrast' : 'default')} className="p-3 bg-slate-100 rounded-full hover:bg-slate-200 transition-all">
+                        <div className="flex gap-2 items-start relative">
+                            <button onClick={() => setShowSettingsPanel(prev => !prev)} className="p-3 bg-slate-100 rounded-full hover:bg-slate-200 transition-all" title="Настройки">
                                 <Icons.Settings />
                             </button>
-                            <button onClick={() => setFontSize(fontSize === 'normal' ? 'big' : 'normal')} className="w-12 h-12 flex items-center justify-center font-bold bg-slate-100 rounded-full">
+                            <button onClick={() => setFontSize(fontSize === 'normal' ? 'big' : 'normal')} className="w-12 h-12 flex items-center justify-center font-bold bg-slate-100 rounded-full" title="Размер на текста">
                                 {fontSize === 'normal' ? 'A+' : 'A-'}
                             </button>
+                            {showSettingsPanel && (
+                                <div className="absolute top-14 left-0 w-72 bg-white border-2 border-slate-200 rounded-2xl shadow-xl p-3 z-50 animate-fade-in">
+                                    <h3 className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-2">⚙️ Настройки</h3>
+                                    <div className="space-y-2">
+                                        <button
+                                            onClick={() => setTheme(theme === 'default' ? 'sop-soft' : theme === 'sop-soft' ? 'sop-high-contrast' : 'default')}
+                                            className="w-full text-left px-3 py-2 rounded-xl bg-slate-50 hover:bg-slate-100 border border-slate-200 font-bold text-slate-700"
+                                        >
+                                            🎨 Тема: {getThemeLabel(theme)}
+                                        </button>
+                                        <button
+                                            onClick={() => setReadMode(prev => getNextReadMode(prev))}
+                                            className={`w-full text-left px-3 py-2 rounded-xl border font-bold transition-colors ${getReadModeMeta(readMode).className}`}
+                                            title={getReadModeMeta(readMode).title}
+                                            disabled={!isTtsEnabledUi}
+                                        >
+                                            {getReadModeMeta(readMode).label}
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div className="flex gap-1 bg-slate-100 p-1 rounded-2xl">
                             <button onClick={() => { setView('student'); setEditLabelModeId(null); }} className={`px-5 py-2 rounded-xl font-bold transition-all ${view === 'student' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}>Ученик</button>
@@ -837,14 +865,6 @@
                                                 title={isTtsEnabledUi ? 'Изключи четеца' : 'Включи четеца'}
                                             >
                                                 {isTtsEnabledUi ? '🔊 Четец: ВКЛ.' : '🔇 Четец: ИЗКЛ.'}
-                                            </button>
-                                            <button
-                                                onClick={() => setReadMode(prev => getNextReadMode(prev))}
-                                                className={`px-4 py-2 rounded-2xl font-bold border-2 transition-colors ${getReadModeMeta(readMode).className}`}
-                                                title={getReadModeMeta(readMode).title}
-                                                disabled={!isTtsEnabledUi}
-                                            >
-                                                {getReadModeMeta(readMode).label}
                                             </button>
                                         </div>
                                     </div>
