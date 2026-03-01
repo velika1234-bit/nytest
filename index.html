@@ -847,6 +847,15 @@
                                                 {getReadModeMeta(readMode).label}
                                             </button>
                                         </div>
+                                        </div>
+                                        <button
+                                            onClick={() => setIsTtsEnabledUi(prev => !prev)}
+                                            className={`px-4 py-2 rounded-2xl font-bold border-2 transition-colors ${isTtsEnabledUi ? 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}
+                                            aria-pressed={isTtsEnabledUi}
+                                            title={isTtsEnabledUi ? 'Изключи четеца' : 'Включи четеца'}
+                                        >
+                                            {isTtsEnabledUi ? '🔊 Четец: ВКЛ.' : '🔇 Четец: ИЗКЛ.'}
+                                        </button>
                                     </div>
                                 )}
 
