@@ -39,9 +39,52 @@
     <script type="text/babel">
         const { useState, useEffect, useRef, forwardRef, useImperativeHandle } = React;
 
-        const speak = (text) => {
-            if (!window.speechSynthesis) return;
-            window.speechSynthesis.cancel();
+        // =========================================================
+        // ТУК ПОСТАВЕТЕ ВАШИЯ API КЛЮЧ ЗА GOOGLE CLOUD TEXT-TO-SPEECH
+        // =========================================================
+        const TTS_API_KEY = "AIzaSyChcpnfSU6JaLGnhwnaqi9BH7cXYDnyceQ"; 
+
+        let currentAudio = null;
+
+        const speak = async (text) => {
+            if (!text) return;
+
+            // Спираме предходното аудио, ако детето кликне бързо на друго място
+            if (currentAudio) {
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+            }
+            if (window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+            }
+
+            // Опит за използване на висококачествен AI глас
+            if (TTS_API_KEY && TTS_API_KEY.trim() !== "") {
+                try {
+                    const response = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${TTS_API_KEY}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            input: { text: text },
+                            voice: { languageCode: 'bg-BG', name: 'bg-BG-Wavenet-A' }, // Wavenet е много по-реалистичен от стандартните гласове
+                            audioConfig: { audioEncoding: 'MP3', speakingRate: 0.9 }
+                        })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        currentAudio = new Audio("data:audio/mp3;base64," + data.audioContent);
+                        currentAudio.play();
+                        return; // Прекратяваме тук, за да не се пусне роботският глас
+                    } else {
+                        console.error("Грешка с AI четеца:", await response.text());
+                    }
+                } catch (err) {
+                    console.error("Мрежова грешка при AI четеца:", err);
+                }
+            }
+
+            // Fallback (Резервен вариант): Вграденият четец на браузъра
             const utterance = new SpeechSynthesisUtterance(text);
             utterance.lang = 'bg-BG';
             utterance.rate = 0.85;
@@ -63,7 +106,7 @@
         const isImageUrl = (str) => typeof str === 'string' && (str.startsWith('http') || str.match(/\.(jpeg|jpg|gif|png)$/) != null);
 
         // ================= МЕДИА ПЛЕЙЪР =================
-        const MediaPlayer = forwardRef(({ url, onReady }, ref) => {
+        const MediaPlayer = forwardRef(({ url, onReady, onEnded }, ref) => {
             const ytPlayerRef = useRef(null);
             const videoRef = useRef(null);
             const [isYt, setIsYt] = useState(false);
@@ -99,7 +142,10 @@
                                     ytPlayerRef.current = new window.YT.Player('yt-player-target', {
                                         videoId: ytId,
                                         playerVars: { 'playsinline': 1, 'modestbranding': 1, 'rel': 0 },
-                                        events: { onReady: () => { if(onReady) onReady(); } }
+                                        events: { 
+                                            onReady: () => { if(onReady) onReady(); },
+                                            onStateChange: (event) => { if(event.data === 0 && onEnded) onEnded(); }
+                                        }
                                     });
                                 }
                             }
@@ -119,6 +165,10 @@
                 getTime: () => {
                     if (isYt && ytPlayerRef.current?.getCurrentTime) return ytPlayerRef.current.getCurrentTime();
                     return videoRef.current?.currentTime || 0;
+                },
+                seekTo: (time) => {
+                    if (isYt && ytPlayerRef.current?.seekTo) ytPlayerRef.current.seekTo(time, true);
+                    else if (videoRef.current) videoRef.current.currentTime = time;
                 }
             }));
 
@@ -126,7 +176,7 @@
                 <div className="w-full h-full relative bg-black">
                     <div ref={containerRef} className={`w-full h-full ${isYt ? 'block' : 'hidden'}`}></div>
                     {!isYt && url && (
-                        <video ref={videoRef} src={url} className="w-full h-full object-contain" controls onLoadedMetadata={onReady} />
+                        <video ref={videoRef} src={url} className="w-full h-full object-contain" controls onLoadedMetadata={onReady} onEnded={onEnded} />
                     )}
                     {!url && (
                         <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 bg-slate-100 z-10 border-4 border-white rounded-xl shadow-inner">
@@ -152,7 +202,7 @@
                 const clientX = e.touches ? e.touches[0].clientX : e.clientX;
                 const clientY = e.touches ? e.touches[0].clientY : e.clientY;
                 initPos.current = { x: clientX - pos.x, y: clientY - pos.y };
-                speak(labelText); // Прочитаме го при хващане
+                speak(isImageUrl(labelText) ? "Картинка" : labelText); // Прочитаме го правилно при хващане
             };
 
             const onPointerMove = (e) => {
@@ -370,13 +420,157 @@
             const [wrongAttempts, setWrongAttempts] = useState([]);
             const [answeredCount, setAnsweredCount] = useState(0);
             const [isProcessing, setIsProcessing] = useState(false);
+            const [isVideoEnded, setIsVideoEnded] = useState(false);
             
             const [editLabelModeId, setEditLabelModeId] = useState(null);
+
+            // Firebase state
+            const [db, setDb] = useState(null);
+            const [user, setUser] = useState(null);
+            const [savedLessons, setSavedLessons] = useState([]);
+            const [showCloudModal, setShowCloudModal] = useState(false);
 
             const playerRef = useRef(null);
             const teacherPlayerRef = useRef(null);
             const teacherVideoContainerRef = useRef(null);
             const fileInputRef = useRef(null);
+
+            // Инициализация на Firebase
+            useEffect(() => {
+                let unsubscribeAuth = null;
+                const initFirebase = async () => {
+                    try {
+                        // =========================================================
+                        // ТУК ПОСТАВЕТЕ ВАШИТЕ ДАННИ ОТ FIREBASE (Project settings)
+                        // =========================================================
+                        const myFirebaseConfig = {
+                            apiKey: "AIzaSyBPx2eogfpKB8iJ6vfQdQyNGVSDDpCaGCk",
+                            authDomain: "videoquiz-inclusive.firebaseapp.com",
+                            projectId: "videoquiz-inclusive",
+                            storageBucket: "videoquiz-inclusive.firebasestorage.app",
+                            messagingSenderId: "309054421863",
+                            appId: "G-12RQ1N9HX3"
+                        };
+
+                        let configToUse;
+                        if (typeof __firebase_config !== 'undefined') {
+                            configToUse = JSON.parse(__firebase_config); // За тестовата среда тук
+                        } else if (myFirebaseConfig.apiKey) {
+                            configToUse = myFirebaseConfig; // За вашия GitHub Pages
+                        } else {
+                            console.warn("Firebase ключовете липсват.");
+                            return; 
+                        }
+                        
+                        const dynamicImport = new Function('url', 'return import(url)');
+                        const { initializeApp } = await dynamicImport("https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js");
+                        const { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } = await dynamicImport("https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js");
+                        const { getFirestore } = await dynamicImport("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+
+                        const app = initializeApp(configToUse);
+                        const auth = getAuth(app);
+                        const firestoreDb = getFirestore(app);
+                        setDb(firestoreDb);
+
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
+
+                        unsubscribeAuth = onAuthStateChanged(auth, setUser);
+                    } catch (err) {
+                        console.error("Firebase init error", err);
+                    }
+                };
+                initFirebase();
+                return () => { if (unsubscribeAuth) unsubscribeAuth(); };
+            }, []);
+
+            // Извличане на запазените уроци
+            useEffect(() => {
+                if (!user || !db) return;
+                let unsubscribeData = null;
+                const fetchData = async () => {
+                    const dynamicImport = new Function('url', 'return import(url)');
+                    const { collection, onSnapshot } = await dynamicImport("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'videoquiz-inclusive-app';
+                    const lessonsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'lessons');
+                    
+                    unsubscribeData = onSnapshot(lessonsRef, (snapshot) => {
+                        const lessons = [];
+                        snapshot.forEach(doc => {
+                            lessons.push({ id: doc.id, ...doc.data() });
+                        });
+                        lessons.sort((a, b) => b.createdAt - a.createdAt);
+                        setSavedLessons(lessons);
+                    }, (error) => {
+                        console.error("Firestore error:", error);
+                    });
+                };
+                fetchData();
+                return () => { if (unsubscribeData) unsubscribeData(); };
+            }, [user, db]);
+
+            const saveToCloud = async () => {
+                if (!user || !db) return alert("Няма връзка с облака. Моля, проверете дали приложението е стартирано правилно и дали ключовете са въведени.");
+                try {
+                    const dynamicImport = new Function('url', 'return import(url)');
+                    const { collection, addDoc } = await dynamicImport("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'videoquiz-inclusive-app';
+                    const lessonsRef = collection(db, 'artifacts', appId, 'users', user.uid, 'lessons');
+                    
+                    const name = prompt("Въведете име на урока:", `Урок ${new Date().toLocaleDateString()}`);
+                    if (!name) return;
+
+                    await addDoc(lessonsRef, {
+                        name,
+                        videoUrl,
+                        questions: JSON.stringify(questions),
+                        createdAt: Date.now()
+                    });
+                    alert("✅ Урокът е запазен успешно в облака!");
+                } catch (e) {
+                    console.error(e);
+                    alert("Грешка при запазване. Проверете правилата (Rules) на Firestore.");
+                }
+            };
+
+            const loadFromCloud = (lesson) => {
+                if (!confirm(`Искате ли да заредите урока "${lesson.name}" за редакция? Текущите незапазени промени ще бъдат изгубени.`)) return;
+                setVideoUrl(lesson.videoUrl || '');
+                try {
+                    setQuestions(typeof lesson.questions === 'string' ? JSON.parse(lesson.questions) : lesson.questions);
+                } catch(e) {
+                    setQuestions([]);
+                }
+                setShowCloudModal(false);
+            };
+
+            const startFromCloud = (lesson) => {
+                // Зарежда урока и директно прехвърля към изгледа за ученика
+                setVideoUrl(lesson.videoUrl || '');
+                try {
+                    setQuestions(typeof lesson.questions === 'string' ? JSON.parse(lesson.questions) : lesson.questions);
+                } catch(e) {
+                    setQuestions([]);
+                }
+                setView('student');
+                setShowCloudModal(false);
+            };
+
+            const deleteFromCloud = async (id) => {
+                if (!confirm("Сигурни ли сте, че искате да изтриете този урок завинаги?")) return;
+                try {
+                    const dynamicImport = new Function('url', 'return import(url)');
+                    const { doc, deleteDoc } = await dynamicImport("https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js");
+                    const appId = typeof __app_id !== 'undefined' ? __app_id : 'videoquiz-inclusive-app';
+                    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'lessons', id));
+                } catch (e) {
+                    console.error(e);
+                    alert("Грешка при изтриване.");
+                }
+            };
 
             // Зареждане на теста от споделен линк
             useEffect(() => {
@@ -394,31 +588,15 @@
                 }
             }, []);
 
-            const handleCopyLink = () => {
-                if (!window.LZString) return alert("Грешка при компресия.");
-                const data = { videoUrl, questions };
-                const compressed = window.LZString.compressToEncodedURIComponent(JSON.stringify(data));
-                const link = `${window.location.origin}${window.location.pathname}#${compressed}`;
-                
-                // Използваме универсален метод за копиране, който работи дори в ограничени прозорци
-                try {
-                    const textArea = document.createElement("textarea");
-                    textArea.value = link;
-                    textArea.style.position = "fixed";  // Предпазва от скролиране
-                    textArea.style.opacity = "0";
-                    document.body.appendChild(textArea);
-                    textArea.focus();
-                    textArea.select();
-                    const successful = document.execCommand('copy');
-                    document.body.removeChild(textArea);
-                    
-                    if (successful) {
-                        alert("✅ Линкът е копиран! Изпратете го на ученика.");
-                    } else {
-                        alert("⚠️ Неуспешно автоматично копиране.");
-                    }
-                } catch (err) {
-                    alert("⚠️ Възникна грешка при копирането.");
+            const handleRestartTest = () => {
+                setAnsweredCount(0);
+                setWrongAttempts([]);
+                setActiveQ(null);
+                setFeedback(null);
+                setIsVideoEnded(false);
+                if (playerRef.current && playerRef.current.seekTo) {
+                    playerRef.current.seekTo(0);
+                    playerRef.current.play();
                 }
             };
 
@@ -536,6 +714,8 @@
                 if (type === 'label') setEditLabelModeId(newQ.id);
             };
 
+            const isFinished = questions.length > 0 && answeredCount >= questions.length && isVideoEnded;
+
             return (
                 <div className={`min-h-screen transition-all ${theme} ${fontSize === 'big' ? 'big-font' : ''}`}>
                     <nav className="bg-white border-b p-3 flex justify-between items-center sticky top-0 z-50 shadow-sm">
@@ -570,10 +750,24 @@
                                 )}
 
                                 <div className="aspect-video relative rounded-3xl overflow-hidden shadow-2xl bg-black">
-                                    <MediaPlayer ref={playerRef} url={videoUrl} onReady={() => {}} />
+                                    <MediaPlayer ref={playerRef} url={videoUrl} onReady={() => {}} onEnded={() => setIsVideoEnded(true)} />
                                     
                                     {/* --- ИНТЕРФЕЙС ЗА ВЪПРОСИТЕ ПРИ УЧЕНИКА --- */}
                                     
+                                    {/* ФИНАЛЕН ЕКРАН */}
+                                    {isFinished && !activeQ && !feedback && (
+                                        <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center p-6 z-50 animate-fade-in">
+                                            <div className="text-center">
+                                                <div className="text-[6rem] sm:text-[8rem] mb-6 animate-bounce-short drop-shadow-lg">🏆</div>
+                                                <h2 className="text-4xl sm:text-6xl font-black text-green-600 mb-8 drop-shadow-sm">Чудесна работа!</h2>
+                                                <p className="text-xl sm:text-2xl font-bold text-slate-500 mb-10">Ти премина успешно целия урок.</p>
+                                                <button onClick={handleRestartTest} className="px-8 py-4 bg-blue-600 text-white rounded-2xl font-black text-xl hover:bg-blue-700 shadow-xl transition-transform hover:scale-105 active:scale-95 flex items-center justify-center gap-3 mx-auto">
+                                                    <span className="text-2xl">🔁</span> Започни отначало
+                                                </button>
+                                            </div>
+                                        </div>
+                                    )}
+
                                     {/* ТИП: ТЕСТ (Множествен избор) */}
                                     {activeQ && activeQ.type === 'single' && (
                                         <div className="absolute inset-0 bg-white/95 flex items-center justify-center p-6 z-40 animate-fade-in overflow-y-auto">
@@ -685,13 +879,13 @@
                                     <div className="bg-blue-50 border-2 border-blue-200 p-5 rounded-3xl flex flex-col sm:flex-row justify-between items-center gap-4">
                                         <div className="text-center sm:text-left">
                                             <h3 className="font-black text-blue-800 text-lg">Готови ли сте с теста?</h3>
-                                            <p className="text-sm text-blue-600">Копирайте линка или запазете файла за обмен с колеги.</p>
+                                            <p className="text-sm text-blue-600">Запазете файла за обмен с колеги или го качете в облака.</p>
                                         </div>
                                         <div className="flex flex-wrap justify-center sm:justify-end gap-2 w-full sm:w-auto">
                                             <input type="file" accept=".json" style={{ display: 'none' }} ref={fileInputRef} onChange={handleImport} />
+                                            <button onClick={() => setShowCloudModal(true)} className="bg-white text-blue-600 border-2 border-blue-600 px-4 py-3 rounded-2xl font-black hover:bg-blue-50 transition-all text-sm shadow-sm flex-1 sm:flex-none">☁️ Облак</button>
                                             <button onClick={() => fileInputRef.current.click()} className="bg-white text-blue-600 border-2 border-blue-600 px-4 py-3 rounded-2xl font-black hover:bg-blue-50 transition-all text-sm shadow-sm flex-1 sm:flex-none">📂 Зареди</button>
                                             <button onClick={handleExport} className="bg-white text-blue-600 border-2 border-blue-600 px-4 py-3 rounded-2xl font-black hover:bg-blue-50 transition-all text-sm shadow-sm flex-1 sm:flex-none">💾 Запази</button>
-                                            <button onClick={handleCopyLink} className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-black hover:bg-blue-700 shadow-xl transition-all text-sm w-full sm:w-auto">🔗 Копирай линк</button>
                                         </div>
                                     </div>
 
@@ -877,6 +1071,45 @@
                                             </div>
                                         </div>
                                     </div>
+
+                                    {/* МОДАЛ ЗА ОБЛАКА */}
+                                    {showCloudModal && (
+                                        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                                            <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-fade-in border-4 border-blue-100">
+                                                <div className="p-5 border-b-2 border-slate-100 flex justify-between items-center bg-white">
+                                                    <h2 className="text-xl sm:text-2xl font-black text-blue-800 flex items-center gap-2">☁️ Моите уроци (Облак)</h2>
+                                                    <button onClick={() => setShowCloudModal(false)} className="text-slate-400 hover:text-red-500 hover:bg-red-50 w-10 h-10 rounded-full flex items-center justify-center font-black transition-colors">&times;</button>
+                                                </div>
+                                                <div className="p-6 flex-1 overflow-y-auto bg-slate-50">
+                                                    <button onClick={saveToCloud} className="w-full bg-blue-600 text-white p-4 rounded-2xl font-black text-lg hover:bg-blue-700 shadow-lg shadow-blue-200 mb-8 transition-transform active:scale-95 flex items-center justify-center gap-2">
+                                                        ➕ Запази текущия урок
+                                                    </button>
+                                                    
+                                                    <h3 className="font-bold text-slate-500 uppercase tracking-wider text-sm mb-4">Запазени уроци</h3>
+                                                    {savedLessons.length === 0 ? (
+                                                        <div className="text-center py-12 bg-white rounded-2xl border-2 border-dashed border-slate-200 text-slate-400 font-bold italic">Все още нямате запазени уроци.</div>
+                                                    ) : (
+                                                        <div className="space-y-3">
+                                                            {savedLessons.map(lesson => (
+                                                                <div key={lesson.id} className="bg-white border-2 border-slate-200 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-blue-400 hover:shadow-md transition-all">
+                                                                    <div>
+                                                                        <h3 className="font-bold text-slate-800 text-lg leading-tight">{lesson.name}</h3>
+                                                                        <p className="text-xs font-bold text-slate-400 mt-1">{new Date(lesson.createdAt).toLocaleString()}</p>
+                                                                    </div>
+                                                                    <div className="flex flex-wrap gap-2 shrink-0">
+                                                                        <button onClick={() => startFromCloud(lesson)} className="px-4 py-2.5 bg-green-100 text-green-700 rounded-xl font-bold hover:bg-green-200 transition-colors flex-1 sm:flex-none">▶️ Старт</button>
+                                                                        <button onClick={() => loadFromCloud(lesson)} className="px-4 py-2.5 bg-blue-100 text-blue-700 rounded-xl font-bold hover:bg-blue-200 transition-colors flex-1 sm:flex-none">✏️ Редактиране</button>
+                                                                        <button onClick={() => deleteFromCloud(lesson.id)} className="px-4 py-2.5 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition-colors flex items-center justify-center"><Icons.Trash /></button>
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
                                 </div>
                             )
                         )}
@@ -890,5 +1123,3 @@
 </body>
 
 </html>
-
-
