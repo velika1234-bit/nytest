@@ -51,6 +51,15 @@
             return cleanP1 + cleanP2;
         };
 
+        const safeJsonParse = (value, fallbackValue = null) => {
+            try {
+                return JSON.parse(value);
+            } catch (err) {
+                console.error('JSON parse error:', err);
+                return fallbackValue;
+            }
+        };
+
         // =========================================================
         // 1. КЛЮЧ ЗА GOOGLE CLOUD TEXT-TO-SPEECH (ЧЕТЕЦЪТ)
         // =========================================================
@@ -468,11 +477,15 @@
 
                         let configToUse;
                         if (typeof __firebase_config !== 'undefined' && __firebase_config) {
-                            configToUse = JSON.parse(__firebase_config);
-                        } else if (myFirebaseConfig.apiKey && myFirebaseConfig.projectId) {
+                            configToUse = safeJsonParse(__firebase_config, null);
+                        }
+
+                        if (!configToUse && myFirebaseConfig.apiKey && myFirebaseConfig.projectId) {
                             configToUse = myFirebaseConfig;
-                        } else {
-                            return; 
+                        }
+
+                        if (!configToUse) {
+                            return;
                         }
                         
                         const dynamicImport = new Function('url', 'return import(url)');
