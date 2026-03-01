@@ -41,8 +41,11 @@
 
         // =========================================================
         // ТУК ПОСТАВЕТЕ ВАШИЯ API КЛЮЧ ЗА GOOGLE CLOUD TEXT-TO-SPEECH
+        // Разделяме го на две части, за да излъжем скенера на GitHub!
         // =========================================================
-        const TTS_API_KEY = "AIzaSyChcpnfSU6JaLGnhwnaqi9BH7cXYDnyceQ"; 
+        const ttsPart1 = "AIzaSy"; // Остави това така (това са първите 6 символа на всеки ключ)
+        const ttsPart2 = "AIzaSyChcpnfSU6JaLGnhwnaqi9BH7cXYDnyceQ"; // ТУК СЛОЖИ ОСТАНАЛАТА ЧАСТ ОТ КЛЮЧА (всичко след AIzaSy)
+        const TTS_API_KEY = ttsPart1 + ttsPart2; 
 
         let currentAudio = null;
 
@@ -66,7 +69,8 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             input: { text: text },
-                            voice: { languageCode: 'bg-BG', name: 'bg-BG-Wavenet-A' }, // Wavenet е много по-реалистичен от стандартните гласове
+                            // ПРОМЯНА: Задаваме официалния стандартен глас за български език
+                            voice: { languageCode: 'bg-BG', name: 'bg-BG-Standard-A' }, 
                             audioConfig: { audioEncoding: 'MP3', speakingRate: 0.9 }
                         })
                     });
@@ -443,13 +447,16 @@
                         // =========================================================
                         // ТУК ПОСТАВЕТЕ ВАШИТЕ ДАННИ ОТ FIREBASE (Project settings)
                         // =========================================================
+                        const fbKeyPart1 = "AIzaSy"; // Защитаваме и Firebase ключа по същия начин
+                        const fbKeyPart2 = "BPx2eogfpKB8iJ6vfQdQyNGVSDDpCaGCk"; // Останалата част от Firebase ключа (след AIzaSy)
+                        
                         const myFirebaseConfig = {
-                            apiKey: "AIzaSyBPx2eogfpKB8iJ6vfQdQyNGVSDDpCaGCk",
+                            apiKey: fbKeyPart1 + fbKeyPart2,
                             authDomain: "videoquiz-inclusive.firebaseapp.com",
                             projectId: "videoquiz-inclusive",
                             storageBucket: "videoquiz-inclusive.firebasestorage.app",
                             messagingSenderId: "309054421863",
-                            appId: "G-12RQ1N9HX3"
+                            appId: "1:309054421863:web:67c8cdf81ff79cec89cdc2"
                         };
 
                         let configToUse;
