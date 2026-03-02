@@ -442,6 +442,21 @@
 
         // ================= ГЛАВНО ПРИЛОЖЕНИЕ =================
         const App = () => {
+            const normalizeQuestion = (question) => {
+                if (!question || typeof question !== 'object') return question;
+                const normalizedText = (question.text || question.prompt || '').toString();
+
+                return {
+                    ...question,
+                    text: normalizedText,
+                    time: Number.isFinite(Number(question.time)) ? Math.max(0, Math.floor(Number(question.time))) : 0
+                };
+            };
+
+            const normalizeQuestions = (items) => (Array.isArray(items) ? items.map(normalizeQuestion) : []);
+            const getQuestionText = (question) => (question?.text || question?.prompt || '').toString();
+            const getQuestionTtsText = (question) => (question?.tts || getQuestionText(question)).toString();
+
             const [view, setView] = useState('student');
             const [videoUrl, setVideoUrl] = useState('');
             const [questions, setQuestions] = useState([]);
@@ -458,6 +473,7 @@
             
             const [wrongAttempts, setWrongAttempts] = useState([]);
             const [answeredCount, setAnsweredCount] = useState(0);
+            const [completedQuestionIds, setCompletedQuestionIds] = useState([]);
             const [isProcessing, setIsProcessing] = useState(false);
             const [isVideoEnded, setIsVideoEnded] = useState(false);
             
@@ -589,7 +605,10 @@
                 if (!confirm(`Зареждане на "${lesson.name}" за редакция?`)) return;
                 setVideoUrl(lesson.videoUrl || '');
                 try {
-                    setQuestions(typeof lesson.questions === 'string' ? JSON.parse(lesson.questions) : lesson.questions);
+                    const parsedQuestions = typeof lesson.questions === 'string' ? JSON.parse(lesson.questions) : lesson.questions;
+                    setQuestions(normalizeQuestions(parsedQuestions));
+                    setCompletedQuestionIds([]);
+                    setAnsweredCount(0);
                 } catch(e) {
                     setQuestions([]);
                 }
@@ -599,7 +618,10 @@
             const startFromCloud = (lesson) => {
                 setVideoUrl(lesson.videoUrl || '');
                 try {
-                    setQuestions(typeof lesson.questions === 'string' ? JSON.parse(lesson.questions) : lesson.questions);
+                    const parsedQuestions = typeof lesson.questions === 'string' ? JSON.parse(lesson.questions) : lesson.questions;
+                    setQuestions(normalizeQuestions(parsedQuestions));
+                    setCompletedQuestionIds([]);
+                    setAnsweredCount(0);
                 } catch(e) {
                     setQuestions([]);
                 }
@@ -622,6 +644,7 @@
 
             const handleRestartTest = () => {
                 setAnsweredCount(0);
+                setCompletedQuestionIds([]);
                 setWrongAttempts([]);
                 setActiveQ(null);
                 setFeedback(null);
@@ -654,7 +677,9 @@
                         const data = JSON.parse(e.target.result);
                         if (data.videoUrl !== undefined && Array.isArray(data.questions)) {
                             setVideoUrl(data.videoUrl);
-                            setQuestions(data.questions);
+                            setQuestions(normalizeQuestions(data.questions));
+                            setCompletedQuestionIds([]);
+                            setAnsweredCount(0);
                             alert("✅ Урокът е зареден успешно!");
                         } else { alert("⚠️ Невалиден файл."); }
                     } catch (error) { alert("⚠️ Грешка."); }
@@ -719,15 +744,19 @@
                 if (!question) return;
 
                 const optionsText = readMode === 'question_options' ? getQuestionOptionsText(question) : '';
-                const textToRead = optionsText ? `${question.text}. ${optionsText}` : question.text;
+                const baseText = getQuestionTtsText(question);
+                const textToRead = optionsText ? `${baseText}. ${optionsText}` : baseText;
                 await speak(textToRead);
             };
 
             useEffect(() => {
                 const interval = setInterval(() => {
                     if (view === 'student' && playerRef.current && !activeQ && !feedback) {
-                        const time = Math.floor(playerRef.current.getTime());
-                        const q = questions.find(q => q.time === time);
+                        const time = playerRef.current.getTime();
+                        const q = questions
+                            .filter(q => !completedQuestionIds.includes(q.id))
+                            .sort((a, b) => a.time - b.time)
+                            .find(q => time >= q.time);
                         if (q && !wrongAttempts.length && !isProcessing) {
                             playerRef.current.pause();
                             setActiveQ(q);
@@ -738,7 +767,7 @@
                     }
                 }, 1000);
                 return () => clearInterval(interval);
-            }, [questions, activeQ, feedback, view, wrongAttempts, isProcessing, readMode]);
+            }, [questions, activeQ, feedback, view, wrongAttempts, isProcessing, readMode, completedQuestionIds]);
 
             const captureTime = (idx) => {
                 if (teacherPlayerRef.current) {
@@ -755,18 +784,19 @@
 
                 if (correct) {
                     setFeedback('correct');
-                    speak("Браво! Правилно.");
+                    speak(activeQ?.feedbackCorrect || "Браво! Правилно.");
                     setTimeout(() => {
                         setFeedback(null);
                         setActiveQ(null);
                         setWrongAttempts([]);
+                        setCompletedQuestionIds(prev => prev.includes(activeQ.id) ? prev : [...prev, activeQ.id]);
                         setAnsweredCount(prev => prev + 1);
                         setIsProcessing(false);
                         playerRef.current?.play();
                     }, 2000);
                 } else {
                     setFeedback('wrong');
-                    speak("Опитай отново.");
+                    speak(activeQ?.feedbackWrong || "Опитай отново.");
                     setWrongAttempts(prev => [...prev, index]);
                     setTimeout(() => {
                         setFeedback(null);
@@ -777,9 +807,10 @@
 
             const handleTaskComplete = () => {
                 setFeedback('correct');
-                speak("Браво! Всичко е точно.");
+                speak(activeQ?.feedbackCorrect || "Браво! Всичко е точно.");
                 setTimeout(() => {
                     setFeedback(null);
+                    setCompletedQuestionIds(prev => prev.includes(activeQ.id) ? prev : [...prev, activeQ.id]);
                     setActiveQ(null);
                     setAnsweredCount(prev => prev + 1);
                     playerRef.current?.play();
@@ -889,8 +920,8 @@
                                     {activeQ && activeQ.type === 'single' && (
                                         <div className="absolute inset-0 bg-white/95 flex items-center justify-center p-6 z-40 animate-fade-in overflow-y-auto">
                                             <div className="w-full max-w-3xl text-center py-8">
-                                                <button onClick={() => speak(activeQ.text)} className="p-5 bg-blue-100 text-blue-600 rounded-full animate-bounce-short mb-6 shadow-md"><Icons.Speaker /></button>
-                                                <h2 className="text-2xl sm:text-4xl font-black mb-10 leading-tight px-4">{activeQ.text}</h2>
+                                                <button onClick={() => speak(getQuestionTtsText(activeQ))} className="p-5 bg-blue-100 text-blue-600 rounded-full animate-bounce-short mb-6 shadow-md"><Icons.Speaker /></button>
+                                                <h2 className="text-2xl sm:text-4xl font-black mb-10 leading-tight px-4">{getQuestionText(activeQ)}</h2>
                                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 px-2">
                                                     {activeQ.options.map((opt, i) => {
                                                         if (wrongAttempts.includes(i)) return null; 
@@ -918,8 +949,8 @@
                                     {activeQ && activeQ.type === 'binary' && (
                                         <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center p-6 z-40 animate-fade-in overflow-y-auto">
                                             <div className="w-full max-w-4xl text-center py-8">
-                                                <button onClick={() => speak(activeQ.text)} className="p-5 bg-blue-100 text-blue-600 rounded-full animate-bounce-short mb-8 shadow-md"><Icons.Speaker /></button>
-                                                <h2 className="text-3xl sm:text-5xl font-black mb-12 leading-tight px-4">{activeQ.text}</h2>
+                                                <button onClick={() => speak(getQuestionTtsText(activeQ))} className="p-5 bg-blue-100 text-blue-600 rounded-full animate-bounce-short mb-8 shadow-md"><Icons.Speaker /></button>
+                                                <h2 className="text-3xl sm:text-5xl font-black mb-12 leading-tight px-4">{getQuestionText(activeQ)}</h2>
                                                 <div className="flex justify-center gap-6 sm:gap-12 px-2">
                                                     {!wrongAttempts.includes('true') && (
                                                         <button onClick={() => handleTestAnswer(activeQ.correct === true, 'true')} disabled={isProcessing} className="w-40 h-40 sm:w-56 sm:h-56 bg-white border-8 border-green-400 rounded-[3rem] text-xl font-bold hover:bg-green-50 flex flex-col items-center justify-center gap-2 group transition-transform active:scale-95 shadow-xl">
@@ -941,8 +972,8 @@
                                     {activeQ && activeQ.type === 'emotion' && (
                                         <div className="absolute inset-0 bg-white/95 flex items-center justify-center p-6 z-40 animate-fade-in overflow-y-auto">
                                             <div className="w-full max-w-4xl text-center py-8">
-                                                <button onClick={() => speak(activeQ.text)} className="p-5 bg-blue-100 text-blue-600 rounded-full animate-bounce-short mb-6 shadow-md"><Icons.Speaker /></button>
-                                                <h2 className="text-2xl sm:text-5xl font-black mb-10 leading-tight px-4">{activeQ.text}</h2>
+                                                <button onClick={() => speak(getQuestionTtsText(activeQ))} className="p-5 bg-blue-100 text-blue-600 rounded-full animate-bounce-short mb-6 shadow-md"><Icons.Speaker /></button>
+                                                <h2 className="text-2xl sm:text-5xl font-black mb-10 leading-tight px-4">{getQuestionText(activeQ)}</h2>
                                                 <div className="grid grid-cols-2 gap-4 sm:gap-8 px-2 max-w-2xl mx-auto">
                                                     {activeQ.options.map((opt, i) => {
                                                         if (wrongAttempts.includes(i)) return null; 
