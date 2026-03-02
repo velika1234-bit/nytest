@@ -444,16 +444,64 @@
         const App = () => {
             const normalizeQuestion = (question) => {
                 if (!question || typeof question !== 'object') return question;
-                const normalizedText = (question.text || question.prompt || '').toString();
 
-                return {
+                const normalizedType = (question.type || 'single').toString();
+                const normalizedText = (question.text || question.prompt || question.question || '').toString().trim();
+                const normalizedTime = Number.isFinite(Number(question.time)) ? Math.max(0, Math.floor(Number(question.time))) : 0;
+
+                const baseQuestion = {
                     ...question,
+                    type: normalizedType,
                     text: normalizedText,
-                    time: Number.isFinite(Number(question.time)) ? Math.max(0, Math.floor(Number(question.time))) : 0
+                    prompt: normalizedText,
+                    time: normalizedTime,
+                    tts: (question.tts || '').toString(),
+                    feedbackCorrect: (question.feedbackCorrect || '').toString(),
+                    feedbackWrong: (question.feedbackWrong || '').toString()
                 };
+
+                if (normalizedType === 'binary') {
+                    if (typeof baseQuestion.correct !== 'boolean') {
+                        const normalizedCorrect = String(baseQuestion.correct).toLowerCase();
+                        baseQuestion.correct = normalizedCorrect === 'true' || normalizedCorrect === '1';
+                    }
+                }
+
+                if (normalizedType === 'single' || normalizedType === 'emotion') {
+                    baseQuestion.options = Array.isArray(question.options) ? question.options.map(opt => String(opt)) : [];
+                    baseQuestion.correct = Number.isFinite(Number(question.correct)) ? Number(question.correct) : 0;
+                }
+
+                if (normalizedType === 'sequence') {
+                    baseQuestion.items = Array.isArray(question.items)
+                        ? question.items.map(item => String(item))
+                        : (Array.isArray(question.options) ? question.options.map(item => String(item)) : []);
+                }
+
+                if (normalizedType === 'label') {
+                    baseQuestion.dropZones = Array.isArray(question.dropZones)
+                        ? question.dropZones
+                        : [];
+                }
+
+                return baseQuestion;
             };
 
             const normalizeQuestions = (items) => (Array.isArray(items) ? items.map(normalizeQuestion) : []);
+            const normalizeLessonPayload = (data) => {
+                if (!data || typeof data !== 'object') return null;
+
+                const normalizedVideoUrl = [data.videoUrl, data.videoURL, data.video_url]
+                    .find(value => typeof value === 'string' && value.trim().length > 0) || '';
+
+                if (!Array.isArray(data.questions)) return null;
+
+                return {
+                    videoUrl: normalizedVideoUrl,
+                    questions: normalizeQuestions(data.questions)
+                };
+            };
+
             const getQuestionText = (question) => (question?.text || question?.prompt || '').toString();
             const getQuestionTtsText = (question) => (question?.tts || getQuestionText(question)).toString();
 
@@ -656,7 +704,11 @@
             };
 
             const handleExport = () => {
-                const data = { videoUrl, questions };
+                const normalizedForExport = normalizeQuestions(questions).map(question => ({
+                    ...question,
+                    prompt: getQuestionText(question)
+                }));
+                const data = { videoUrl, questions: normalizedForExport };
                 const jsonString = JSON.stringify(data, null, 2);
                 const blob = new Blob([jsonString], { type: "application/json" });
                 const url = URL.createObjectURL(blob);
@@ -675,9 +727,11 @@
                 reader.onload = (e) => {
                     try {
                         const data = JSON.parse(e.target.result);
-                        if (data.videoUrl !== undefined && Array.isArray(data.questions)) {
-                            setVideoUrl(data.videoUrl);
-                            setQuestions(normalizeQuestions(data.questions));
+                        const normalizedLesson = normalizeLessonPayload(data);
+
+                        if (normalizedLesson) {
+                            setVideoUrl(normalizedLesson.videoUrl);
+                            setQuestions(normalizedLesson.questions);
                             setCompletedQuestionIds([]);
                             setAnsweredCount(0);
                             alert("✅ Урокът е зареден успешно!");
